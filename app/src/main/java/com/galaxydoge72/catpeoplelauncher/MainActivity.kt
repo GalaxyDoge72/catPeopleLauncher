@@ -42,6 +42,8 @@ val TARGET_APP_PACKAGES = setOf(
 val SPECIAL_BACKGROUND_RES_ID = R.drawable.silly_cat
 const val DEFAULT_BACKGROUND_RES_ID = 0 // Represents the default state (no special image)
 
+const val WALLPAPER_TIMEOUT_MS = 15 * 60 * 1000L
+
 data class AppInfo(
     val appName: String,
     val packageName: String,
@@ -137,7 +139,8 @@ fun AppIconItem(
 @Composable
 fun LauncherScreen(appContext: Context) {
     var appList by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    var currentBackgroundResId by remember { mutableStateOf(DEFAULT_BACKGROUND_RES_ID) }
+    var currentBackgroundResId by remember { mutableIntStateOf(DEFAULT_BACKGROUND_RES_ID) }
+    var resetTime by remember { mutableLongStateOf(0L) }
 
     // Load app list once
     LaunchedEffect(Unit) {
@@ -146,11 +149,10 @@ fun LauncherScreen(appContext: Context) {
         }
     }
 
-    // Effect to reset the background when the screen becomes active again
-    if (currentBackgroundResId != DEFAULT_BACKGROUND_RES_ID) {
-        LaunchedEffect(Unit) {
-            delay(500)
-            currentBackgroundResId = DEFAULT_BACKGROUND_RES_ID
+    if (resetTime > 0) {
+        LaunchedEffect(resetTime) {
+            val remainingTime = (resetTime + WALLPAPER_TIMEOUT_MS) - System.currentTimeMillis()
+
         }
     }
 
