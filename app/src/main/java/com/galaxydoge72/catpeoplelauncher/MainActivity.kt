@@ -21,17 +21,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.galaxydoge72.catpeoplelauncher.ui.theme.CatPeopleLauncherTheme
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
+import kotlinx.coroutines.delay // Import for the delay function
 
 // ----------------------------------------------------------------------
-// DATA MODEL
+// CONSTANTS & DATA MODEL
 // ----------------------------------------------------------------------
+val TARGET_APP_PACKAGES = setOf(
+    "com.discord",
+    "cocobo1.pupu.app"
+)
+
+val SPECIAL_BACKGROUND_RES_ID = R.drawable.silly_cat
+const val DEFAULT_BACKGROUND_RES_ID = 0 // Represents the default state (no special image)
 
 data class AppInfo(
     val appName: String,
@@ -51,7 +60,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CatPeopleLauncherTheme {
-                // Pass the Context to the Composable to access the Package Manager
                 LauncherScreen(appContext = this)
             }
         }
@@ -66,31 +74,26 @@ class MainActivity : ComponentActivity() {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
 
-        // Query for all activities that can handle the LAUNCHER intent
         val resolvedInfoList: List<ResolveInfo> = packageManager.queryIntentActivities(mainIntent, 0)
 
         return resolvedInfoList
-            .map { resolveInfo ->
-                val appName = resolveInfo.loadLabel(packageManager).toString()
+            .mapNotNull { resolveInfo ->
                 val packageName = resolveInfo.activityInfo.packageName
-                val icon = resolveInfo.loadIcon(packageManager)
-
-                // Create the intent used to launch the app
                 val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                    ?: Intent().apply {
-                        setClassName(packageName, resolveInfo.activityInfo.name)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
 
-                AppInfo(
-                    appName = appName,
-                    packageName = packageName,
-                    icon = icon,
-                    launchIntent = launchIntent
-                )
+                // Only create AppInfo if a launch Intent is found
+                if (launchIntent != null) {
+                    AppInfo(
+                        appName = resolveInfo.loadLabel(packageManager).toString(),
+                        packageName = packageName,
+                        icon = resolveInfo.loadIcon(packageManager),
+                        launchIntent = launchIntent
+                    )
+                } else {
+                    null
+                }
             }
-            .filter { true } // Only include apps we can actually launch
-            .sortedBy { it.appName.lowercase() } // Sort alphabetically
+            .sortedBy { it.appName.lowercase() }
     }
 }
 
@@ -99,19 +102,22 @@ class MainActivity : ComponentActivity() {
 // ----------------------------------------------------------------------
 
 @Composable
-fun AppIconItem(appInfo: AppInfo, modifier: Modifier = Modifier) {
+fun AppIconItem(
+    appInfo: AppInfo,
+    onLaunch: () -> Unit, // Callback when the app is clicked
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
 
     Column(
         modifier = modifier
             .clickable {
-                // Launches the external application
+                onLaunch() // Trigger the parent callback before launching
                 context.startActivity(appInfo.launchIntent)
             }
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Uses accompanist to draw the Android Drawable (app icon)
         Image(
             painter = rememberDrawablePainter(drawable = appInfo.icon),
             contentDescription = appInfo.appName,
@@ -130,78 +136,108 @@ fun AppIconItem(appInfo: AppInfo, modifier: Modifier = Modifier) {
 
 @Composable
 fun LauncherScreen(appContext: Context) {
-    // State to hold the list of installed applications
     var appList by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    var currentBackgroundResId by remember { mutableStateOf(DEFAULT_BACKGROUND_RES_ID) }
 
-    // Load apps when the composable first enters the composition
+    // Load app list once
     LaunchedEffect(Unit) {
-        // Safely call the loading function
         (appContext as? MainActivity)?.let { activity ->
             appList = activity.loadInstalledApps()
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = Color.Black // Set a dark background
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // 1. Status/Search Bar Placeholder
-            Text(
-                text = "CatPeople Launcher 🐈 - Total Apps: ${appList.size}",
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .background(Color(0x33FFFFFF))
+    // Effect to reset the background when the screen becomes active again
+    if (currentBackgroundResId != DEFAULT_BACKGROUND_RES_ID) {
+        LaunchedEffect(Unit) {
+            delay(500)
+            currentBackgroundResId = DEFAULT_BACKGROUND_RES_ID
+        }
+    }
+
+    // Use Box to stack the background image and the content layers
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black) // Default background color
+    ) {
+        // Display the special background image if the state is set
+        if (currentBackgroundResId != DEFAULT_BACKGROUND_RES_ID) {
+            Image(
+                painter = painterResource(id = currentBackgroundResId),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
             )
+        }
 
-            // 2. Main App Grid (Takes up the majority of the screen space)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(5), // 5 icons per row
-                contentPadding = PaddingValues(8.dp),
-                // Use weight to make the grid fill the space between the top bar and the dock
-                modifier = Modifier.weight(1f)
-            ) {
-                items(appList) { appInfo ->
-                    AppIconItem(appInfo = appInfo)
-                }
-            }
-
-            // 3. Dock (Persistent Bottom Row)
-            Row(
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            // Make content transparent so the Box background shows
+            containerColor = Color.Transparent,
+            contentColor = Color.White
+        ) { innerPadding ->
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .background(Color(0x55000000)), // Darker, semi-transparent dock
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .padding(innerPadding)
             ) {
-                // Placeholder: Use the first 4 apps in the list for the dock
-                appList.take(4).forEach { appInfo ->
-                    AppIconItem(
-                        appInfo = appInfo,
-                        modifier = Modifier.width(64.dp)
-                    )
+                // 1. Status/Search Bar Placeholder
+                Text(
+                    text = "CatPeople Launcher 🐈 - Apps: ${appList.size}",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .background(Color(0x33FFFFFF))
+                )
+
+                // 2. Main App Grid
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    contentPadding = PaddingValues(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(appList) { appInfo ->
+                        AppIconItem(
+                            appInfo = appInfo,
+                            onLaunch = {
+                                if (appInfo.packageName in TARGET_APP_PACKAGES) {
+                                    currentBackgroundResId = SPECIAL_BACKGROUND_RES_ID
+                                } else {
+                                    currentBackgroundResId = DEFAULT_BACKGROUND_RES_ID
+                                }
+                            }
+                        )
+                    }
+                }
+
+                // 3. Dock (Persistent Bottom Row)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .background(Color(0x55000000)),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Placeholder: Use the first 4 apps in the list for the dock
+                    appList.take(4).forEach { appInfo ->
+                        AppIconItem(
+                            appInfo = appInfo,
+                            // Apply the same logic for dock apps
+                            onLaunch = {
+                                if (appInfo.packageName in TARGET_APP_PACKAGES) {
+                                    currentBackgroundResId = SPECIAL_BACKGROUND_RES_ID
+                                } else {
+                                    currentBackgroundResId = DEFAULT_BACKGROUND_RES_ID
+                                }
+                            },
+                            modifier = Modifier.width(64.dp)
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-// ----------------------------------------------------------------------
-// PREVIEW (Optional, for development)
-// ----------------------------------------------------------------------
-
-@Preview(showBackground = true)
-@Composable
-fun LauncherPreview() {
-    CatPeopleLauncherTheme {
-        Text("Preview is difficult for launchers, but this works!")
     }
 }
